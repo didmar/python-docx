@@ -2,23 +2,33 @@
 
 from __future__ import annotations
 
-from typing import IO, TYPE_CHECKING, Iterator, cast
+from datetime import datetime
+from typing import IO, TYPE_CHECKING, Iterator, List, cast
 
 from docx.drawing import Drawing
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_BREAK
+from docx.opc.packuri import PackURI
 from docx.oxml.drawing import CT_Drawing
+from docx.oxml.ns import qn
 from docx.oxml.text.pagebreak import CT_LastRenderedPageBreak
 from docx.shape import InlineShape
 from docx.shared import StoryChild
 from docx.styles.style import CharacterStyle
+from docx.text.comment import Comment
 from docx.text.font import Font
+from docx.text.footnote import Footnote
 from docx.text.pagebreak import RenderedPageBreak
 
 if TYPE_CHECKING:
     import docx.types as t
     from docx.enum.text import WD_UNDERLINE
+    from docx.opc.part import Part
+    from docx.oxml.comments import CT_Com, CT_Comments, CT_CRef
+    from docx.oxml.footnotes import CT_Footnotes
     from docx.oxml.text.run import CT_R, CT_Text
+    from docx.parts.comments import CommentsPart
+    from docx.parts.document import DocumentPart
     from docx.shared import Length
 
 
@@ -94,6 +104,25 @@ class Run(StoryChild):
         """
         t = self._r.add_t(text)
         return _Text(t)
+
+    def add_comment(
+        self,
+        text: str,
+        author: str = "python-docx",
+        initials: str = "pd",
+        dtime: datetime | None = None,
+    ) -> Comment:
+        document_part: DocumentPart = self.part
+        comments_part: CommentsPart = document_part._comments_part  # pyright: ignore[reportPrivateUsage]
+        comments_part_comments: CT_Comments = comments_part.comments
+
+        if dtime is None:
+            dtime = datetime.now()
+        date = str(dtime).replace(" ", "T")
+
+        comment: CT_Com = self._r.add_comment(author, initials, date, text, comments_part_comments)
+
+        return Comment(comment, comments_part)
 
     @property
     def bold(self) -> bool | None:
@@ -235,6 +264,94 @@ class Run(StoryChild):
     @underline.setter
     def underline(self, value: bool):
         self.font.underline = value
+
+    @property
+    def footnote(self) -> Footnote | None:
+        _id = self._r.footnote_id
+
+        if _id is not None:
+            footnotes_part_footnotes: CT_Footnotes = (
+                self._parent._parent.part._footnotes_part.element
+            )
+            footnote = footnotes_part_footnotes.get_footnote_by_id(_id)
+            return Footnote(footnote, footnotes_part_footnotes)
+        else:
+            return None
+
+    @property
+    def is_hyperlink(self) -> bool:
+        """
+        checks if the run is nested inside a hyperlink element
+        """
+        return self.element.getparent().tag.split("}")[1] == "hyperlink"
+
+    def get_hyperlink(self) -> tuple[str, bool]:
+        """
+        returns the text of the hyperlink of the run in case of the run has a hyperlink
+        """
+        document = self._parent._parent.document
+        parent = self.element.getparent()
+        link_text = ""
+        if self.is_hyperlink:
+            if parent.attrib.__contains__(qn("r:id")):
+                rId = parent.get(qn("r:id"))
+                link_text = document._part._rels[rId].target_ref
+                return link_text, True
+            elif parent.attrib.__contains__(qn("w:anchor")):
+                link_text = parent.get(qn("w:anchor"))
+                return link_text, False
+            else:
+                print("No Link in Hyperlink!")
+                print(self.text)
+                return "", False
+        else:
+            return "None"
+
+    @property
+    def comments(self) -> List[Comment]:
+        """Return a list of Comment objects for comments referenced by this run."""
+        comment_part_comments: CT_Comments = self._parent._parent.part._comments_part.element
+        comment_refs: list[CT_CRef] = self._element.findall(qn("w:commentReference"))
+        ids = [int(ref.get(qn("w:id"))) for ref in comment_refs]
+        coms: list[CT_Com] = [com for com in comment_part_comments if com._id in ids]
+        return [Comment(com, comment_part_comments) for com in coms]
+
+    def add_ole_object_to_run(self, ole_object_path: str) -> str:
+        """
+        Add saved OLE Object in the disk to an run and retun the newly created relationship ID
+        Note: OLE Objects must be stored in the disc as `.bin` file
+        """
+        reltype: str = (
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject"
+        )
+        pack_path: str = "/word/embeddings/" + ole_object_path.split("\\")[-1]
+        partname: PackURI = PackURI(pack_path)
+        content_type: str = "application/vnd.openxmlformats-officedocument.oleObject"
+
+        with open(ole_object_path, "rb") as f:
+            blob = f.read()
+        target_part: Part = Part(partname=partname, content_type=content_type, blob=blob)
+        rel_id: str = self.part.rels._next_rId  # pyright: ignore[reportPrivateUsage]
+        self.part.rels.add_relationship(reltype=reltype, target=target_part, rId=rel_id)
+        return rel_id
+
+    def add_fldChar(self, fldCharType: str, fldLock: bool = False, dirty: bool = False) -> str:
+        fldChar = self._r.add_fldChar(fldCharType, fldLock, dirty)
+        return fldChar
+
+    @property
+    def instr_text(self) -> str | None:
+        return self._r.instr_text
+
+    @instr_text.setter
+    def instr_text(self, instr_text_val: str):
+        self._r.instr_text = instr_text_val
+
+    def remove_instr_text(self):
+        if self.instr_text is None:
+            return None
+        else:
+            self._r._remove_instr_text()  # pyright: ignore[reportPrivateUsage]
 
 
 class _Text:

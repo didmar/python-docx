@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import docx.types as t
     from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT, WD_TABLE_DIRECTION
     from docx.oxml.table import CT_Row, CT_Tbl, CT_TblPr, CT_Tc
+    from docx.section import Section
     from docx.shared import Length
     from docx.styles.style import (
         ParagraphStyle,
@@ -53,6 +54,10 @@ class Table(StoryChild):
             if gridCol.w is not None:
                 tc.width = gridCol.w
         return _Row(tr, self)
+
+    @property
+    def section(self) -> Section:
+        return Section(self._element._section, self.part)
 
     @property
     def alignment(self) -> WD_TABLE_ALIGNMENT | None:

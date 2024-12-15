@@ -4,17 +4,26 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Iterator, List
 
+from docx.oxml import OxmlElement
 from docx.oxml.drawing import CT_Drawing
 from docx.oxml.ns import qn
-from docx.oxml.simpletypes import ST_BrClear, ST_BrType
-from docx.oxml.text.font import CT_RPr
-from docx.oxml.xmlchemy import BaseOxmlElement, OptionalAttribute, ZeroOrMore, ZeroOrOne
+from docx.oxml.simpletypes import ST_BrClear, ST_BrType, ST_String
+from docx.oxml.text.pagebreak import CT_LastRenderedPageBreak
+from docx.oxml.xmlchemy import (
+    BaseOxmlElement,
+    OptionalAttribute,
+    RequiredAttribute,
+    ZeroOrMore,
+    ZeroOrOne,
+)
 from docx.shared import TextAccumulator
 
 if TYPE_CHECKING:
+    from docx.oxml.comments import CT_Com, CT_Comments
+    from docx.oxml.footnotes import CT_FNR, CT_FootnoteRef
     from docx.oxml.shape import CT_Anchor, CT_Inline
-    from docx.oxml.text.pagebreak import CT_LastRenderedPageBreak
     from docx.oxml.text.parfmt import CT_TabStop
+    from docx.oxml.text.run import CT_RPr
 
 # ------------------------------------------------------------------------------------
 # Run-level elements
@@ -30,6 +39,8 @@ class CT_R(BaseOxmlElement):
     _add_t: Callable[..., CT_Text]
 
     rPr: CT_RPr | None = ZeroOrOne("w:rPr")  # pyright: ignore[reportAssignmentType]
+    # wrong
+    ref = ZeroOrOne("w:commentRangeStart", successors=("w:r",))
     br = ZeroOrMore("w:br")
     cr = ZeroOrMore("w:cr")
     drawing = ZeroOrMore("w:drawing")
@@ -51,6 +62,66 @@ class CT_R(BaseOxmlElement):
         drawing = self._add_drawing()
         drawing.append(inline_or_anchor)
         return drawing
+
+    def add_comment(
+        self,
+        author: str,
+        initials: str,
+        dtime: str,
+        comment_text: str,
+        comment_part_comments: CT_Comments,
+    ) -> CT_Com:
+        comment: CT_Com = comment_part_comments.add_comment(author, initials, dtime)
+        _p = comment._add_p(comment_text)
+        self.add_comment_reference(comment._id)
+        self.link_comment(comment._id)
+
+        return comment
+
+    def link_comment(self, _id: int):
+        rStart = OxmlElement("w:commentRangeStart")
+        rStart._id = _id
+        rEnd = OxmlElement("w:commentRangeEnd")
+        rEnd._id = _id
+        self.addprevious(rStart)
+        self.addnext(rEnd)
+
+    def add_comment_reference(self, _id: int) -> BaseOxmlElement:
+        reference = OxmlElement("w:commentReference")
+        reference._id = _id
+        self.append(reference)
+        return reference
+
+    def add_footnote_reference(self, _id: int) -> "CT_FNR":
+        rPr = self.get_or_add_rPr()
+        rstyle = rPr.get_or_add_rStyle()
+        rstyle.val = "FootnoteReference"
+        reference = OxmlElement("w:footnoteReference")
+        reference._id = _id
+        self.append(reference)
+        return reference
+
+    def add_footnoteRef(self) -> "CT_FootnoteRef":
+        ref = OxmlElement("w:footnoteRef")
+        self.append(ref)
+
+        return ref
+
+    def footnote_style(self) -> "CT_R":
+        rPr = self.get_or_add_rPr()
+        rstyle = rPr.get_or_add_rStyle()
+        rstyle.val = "FootnoteReference"
+
+        self.add_footnoteRef()
+        return self
+
+    @property
+    def footnote_id(self) -> int | None:
+        _id = self.xpath("./w:footnoteReference/@w:id")
+        if len(_id) > 1 or len(_id) == 0:
+            return None
+        else:
+            return int(_id[0])
 
     def clear_content(self) -> None:
         """Remove all child elements except a `w:rPr` element if present."""
@@ -92,6 +163,12 @@ class CT_R(BaseOxmlElement):
         """All `w:lastRenderedPageBreaks` descendants of this run."""
         return self.xpath("./w:lastRenderedPageBreak")
 
+    def add_comment_reference(self, _id: int) -> BaseOxmlElement:
+        reference = OxmlElement("w:commentReference")
+        reference._id = _id
+        self.append(reference)
+        return reference
+
     @property
     def style(self) -> str | None:
         """String contained in `w:val` attribute of `w:rStyle` grandchild.
@@ -119,18 +196,54 @@ class CT_R(BaseOxmlElement):
         Inner-content child elements like `w:tab` are translated to their text
         equivalent.
         """
+        # TODO: insert '-' for qn('w:noBreakHyphen')?
         return "".join(
             str(e) for e in self.xpath("w:br | w:cr | w:noBreakHyphen | w:ptab | w:t | w:tab")
         )
 
     @text.setter
-    def text(self, text: str):  # pyright: ignore[reportIncompatibleMethodOverride]
+    def text(self, text: str):
         self.clear_content()
         _RunContentAppender.append_to_run_from_text(self, text)
 
     def _insert_rPr(self, rPr: CT_RPr) -> CT_RPr:
         self.insert(0, rPr)
         return rPr
+
+    def add_fldChar(
+        self, fldCharType: str, fldLock: bool = False, dirty: bool = False
+    ) -> BaseOxmlElement | None:
+        if fldCharType not in ("begin", "end", "separate"):
+            return None
+
+        fld_char = OxmlElement("w:fldChar")
+        fld_char.set(qn("w:fldCharType"), fldCharType)
+        if fldLock:
+            fld_char.set(qn("w:fldLock"), "true")
+        elif dirty:
+            fld_char.set(qn("w:fldLock"), "true")
+        self.append(fld_char)
+        return fld_char
+
+    @property
+    def instr_text(self) -> BaseOxmlElement | None:
+        for child in list(self):
+            if child.tag.endswith("instrText"):
+                return child
+        return None
+
+    @instr_text.setter
+    def instr_text(self, instr_text_val: str):
+        if self.instr_text is not None:
+            self._remove_instr_text()
+
+        instr_text = OxmlElement("w:instrText")
+        instr_text.text = instr_text_val
+        self.append(instr_text)
+
+    def _remove_instr_text(self):
+        for child in self.iterchildren("{*}instrText"):
+            self.remove(child)
 
 
 # ------------------------------------------------------------------------------------
@@ -222,6 +335,14 @@ class CT_Text(BaseOxmlElement):
         returns None, as etree._Element does when there is no content.
         """
         return self.text or ""
+
+
+class CT_RPr(BaseOxmlElement):
+    rStyle = ZeroOrOne("w:rStyle")
+
+
+class CT_RStyle(BaseOxmlElement):
+    val = RequiredAttribute("w:val", ST_String)
 
 
 # ------------------------------------------------------------------------------------

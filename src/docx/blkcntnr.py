@@ -8,10 +8,12 @@ specialized ones like structured document tags.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Iterator, List, Optional
 
 from typing_extensions import TypeAlias
 
+from docx.api import element
+from docx.oxml.ns import qn
 from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.shared import StoryChild
@@ -20,8 +22,10 @@ from docx.text.paragraph import Paragraph
 if TYPE_CHECKING:
     import docx.types as t
     from docx.oxml.document import CT_Body
+    from docx.oxml.numbering import CT_AbstractNum
     from docx.oxml.section import CT_HdrFtr
     from docx.oxml.table import CT_Tc
+    from docx.section import Section
     from docx.shared import Length
     from docx.styles.style import ParagraphStyle
     from docx.table import Table
@@ -94,6 +98,17 @@ class BlockItemContainer(StoryChild):
         from docx.table import Table
 
         return [Table(tbl, self) for tbl in self._element.tbl_lst]
+
+    @property
+    def elements(self) -> Optional[List[Paragraph | Table | Section]]:
+        """
+        A list containing the elements in this container (paragraph and tables), in document order.
+        """
+        return [element(item, self.part) for item in self._element.getchildren()]
+
+    @property
+    def abstractNumIds(self) -> List[CT_AbstractNum]:
+        return list(self.part.numbering_part.element.iterchildren(qn("w:abstractNum")))
 
     def _add_paragraph(self):
         """Return paragraph newly added to the end of the content in this container."""

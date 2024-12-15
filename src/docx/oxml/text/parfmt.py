@@ -111,6 +111,7 @@ class CT_PPr(BaseOxmlElement):
         "w:ind", successors=_tag_seq[23:]
     )
     jc = ZeroOrOne("w:jc", successors=_tag_seq[27:])
+    rPr = ZeroOrOne("w:rPr", successors=_tag_seq[34:])
     sectPr = ZeroOrOne("w:sectPr", successors=_tag_seq[35:])
     del _tag_seq
 

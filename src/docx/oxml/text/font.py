@@ -45,6 +45,12 @@ class CT_Fonts(BaseOxmlElement):
     hAnsi: str | None = OptionalAttribute(  # pyright: ignore[reportAssignmentType]
         "w:hAnsi", ST_String
     )
+    asciiTheme: str | None = OptionalAttribute(  # pyright: ignore[reportAssignmentType]
+        "w:asciiTheme", ST_String
+    )
+    hAnsiTheme: str | None = OptionalAttribute(  # pyright: ignore[reportAssignmentType]
+        "w:hAnsiTheme", ST_String
+    )
 
 
 class CT_Highlight(BaseOxmlElement):
@@ -221,6 +227,44 @@ class CT_RPr(BaseOxmlElement):
             return
         rFonts = self.get_or_add_rFonts()
         rFonts.hAnsi = value
+
+    @property
+    def rFonts_asciiTheme(self):
+        """
+        The value of `w:rFonts/@w:asciiTheme` or |None| if not present. Represents
+        the assigned typeface Theme. The rFonts element also specifies other
+        special-case typeface Theme; this method handles the case where just
+        the common Theme is required.
+        """
+        rFonts = self.rFonts
+        if rFonts is None:
+            return None
+        return rFonts.asciiTheme
+
+    @rFonts_asciiTheme.setter
+    def rFonts_asciiTheme(self, value: str | None):
+        if value is None:
+            self._remove_rFonts()
+            return
+        rFonts = self.get_or_add_rFonts()
+        rFonts.asciiTheme = value
+
+    @property
+    def rFonts_hAnsiTheme(self):
+        """
+        The value of `w:rFonts/@w:hAnsiTheme` or |None| if not present.
+        """
+        rFonts = self.rFonts
+        if rFonts is None:
+            return None
+        return rFonts.hAnsiTheme
+
+    @rFonts_hAnsiTheme.setter
+    def rFonts_hAnsiTheme(self, value: str | None):
+        if value is None and self.rFonts is None:
+            return
+        rFonts = self.get_or_add_rFonts()
+        rFonts.hAnsiTheme = value
 
     @property
     def style(self) -> str | None:

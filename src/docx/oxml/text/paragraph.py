@@ -11,6 +11,8 @@ from docx.oxml.xmlchemy import BaseOxmlElement, ZeroOrMore, ZeroOrOne
 
 if TYPE_CHECKING:
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    from docx.oxml.comments import CT_Com, CT_Comments
+    from docx.oxml.footnotes import CT_Footnotes
     from docx.oxml.section import CT_SectPr
     from docx.oxml.text.hyperlink import CT_Hyperlink
     from docx.oxml.text.pagebreak import CT_LastRenderedPageBreak
@@ -35,6 +37,54 @@ class CT_P(BaseOxmlElement):
         new_p = cast(CT_P, OxmlElement("w:p"))
         self.addprevious(new_p)
         return new_p
+
+    def link_comment(self, _id: int, rangeStart: int = 0, rangeEnd: int = 0):
+        rStart = OxmlElement("w:commentRangeStart")
+        rStart._id = _id
+        rEnd = OxmlElement("w:commentRangeEnd")
+        rEnd._id = _id
+        if rangeStart == 0 and rangeEnd == 0:
+            self.insert(0, rStart)
+            self.append(rEnd)
+        else:
+            self.insert(rangeStart, rStart)
+            if rangeEnd == len(self.getchildren()) - 1:
+                self.append(rEnd)
+            else:
+                self.insert(rangeEnd + 1, rEnd)
+
+    def add_comm(
+        self,
+        author: str,
+        initials: str,
+        dtime: str,
+        comment_text: str,
+        rangeStart: int,
+        rangeEnd: int,
+        comment_part_comments: CT_Comments,
+    ) -> CT_Com:
+        comment: CT_Com = comment_part_comments.add_comment(author, initials, dtime)
+        comment._add_p(comment_text)
+        _r: CT_R = self.add_r()
+        _r.add_comment_reference(comment._id)
+        self.link_comment(comment._id, rangeStart=rangeStart, rangeEnd=rangeEnd)
+
+        return comment
+
+    def add_fn(self, text: str, footnotes: CT_Footnotes):
+        footnote = footnotes.add_footnote()
+        footnote._add_p(text)
+        _r = self.add_r()
+        _r.add_footnote_reference(footnote._id)
+
+        return footnote
+
+    def footnote_style(self):
+        pPr = self.get_or_add_pPr()
+        rstyle = pPr.get_or_add_pStyle()
+        rstyle.val = "FootnoteText"
+
+        return self
 
     @property
     def alignment(self) -> WD_PARAGRAPH_ALIGNMENT | None:
@@ -87,13 +137,29 @@ class CT_P(BaseOxmlElement):
             return None
         return pPr.style
 
+    @property
+    def comment_id(self) -> int | None:
+        _id = self.xpath("./w:commentRangeStart/@w:id")
+        if len(_id) > 1 or len(_id) == 0:
+            return None
+        else:
+            return int(_id[0])
+
+    @property
+    def footnote_ids(self) -> list[int] | None:
+        _id = self.xpath("./w:r/w:footnoteReference/@w:id")
+        if len(_id) == 0:
+            return None
+        else:
+            return [int(_id) for _id in _id]
+
     @style.setter
     def style(self, style: str | None):
         pPr = self.get_or_add_pPr()
         pPr.style = style
 
     @property
-    def text(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+    def text(self):
         """The textual content of this paragraph.
 
         Inner-content child elements like `w:r` and `w:hyperlink` are translated to

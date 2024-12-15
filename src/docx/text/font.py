@@ -200,6 +200,25 @@ class Font(ElementProxy):
         rPr.rFonts_hAnsi = value
 
     @property
+    def theme(self) -> str | None:
+        """
+        Get or set the typeface theme for this |Font| instance, causing the
+        text it controls to appear in the themed font, if a matching font is
+        found. |None| indicates the typeface is inherited from the style
+        hierarchy.
+        """
+        rPr = self._element.rPr
+        if rPr is None:
+            return None
+        return rPr.rFonts_asciiTheme
+
+    @theme.setter
+    def theme(self, value: str | None):
+        rPr = self._element.get_or_add_rPr()
+        rPr.rFonts_asciiTheme = value
+        rPr.rFonts_hAnsiTheme = value
+
+    @property
     def no_proof(self) -> bool | None:
         """Read/write tri-state value.
 
@@ -398,11 +417,7 @@ class Font(ElementProxy):
         # -- False == 0, which happen to match the mapping for WD_UNDERLINE.SINGLE
         # -- and .NONE respectively.
         val = (
-            WD_UNDERLINE.SINGLE
-            if value is True
-            else WD_UNDERLINE.NONE
-            if value is False
-            else value
+            WD_UNDERLINE.SINGLE if value is True else WD_UNDERLINE.NONE if value is False else value
         )
         rPr.u_val = val
 
